@@ -1,35 +1,97 @@
 
 <?php
-$conexion = new mysqli("127.0.0.1", "root", "", "Biblioteca_GarciaSevilla");
+include("conexion.php");
 
-if ($conexion->connect_error) {
-    die("Error de conexión: " . $conexion->connect_error);
-}
+$mensaje = "";
+$libroEditar = null;
 
-$conexion->set_charset("utf8mb4");
+// ELIMINAR LIBRO
+if (isset($_POST["eliminar"])) {
+    $id = intval($_POST["id_libro"]);
 
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $titulo = $_POST["titulo"];
-    $isbn = $_POST["isbn"];
-    $anio = $_POST["anio"];
-    $autor = $_POST["autor"];
-    $editorial = $_POST["editorial"];
-
-    $sql = $conexion->prepare(
-        "INSERT INTO Libros (titulo, ISBN, anio_publicacion, id_autor, id_editorial)
-         VALUES (?, ?, ?, ?, ?)"
-    );
-
-    $sql->bind_param("ssiii", $titulo, $isbn, $anio, $autor, $editorial);
-    $sql->execute();
+    $stmt = $conn->prepare("DELETE FROM Libros WHERE id_libro = ?");
+    $stmt->bind_param("i", $id);
+    $stmt->execute();
+    $stmt->close();
 
     header("Location: libros.php");
     exit;
 }
 
-$autores = $conexion->query("SELECT id_autor, nombre FROM Autores");
-$editoriales = $conexion->query("SELECT id_editorial, nombre FROM Editoriales");
-$libros = $conexion->query("SELECT * FROM Libros");
+// REGISTRAR O MODIFICAR LIBRO
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["guardar"])) {
+
+    $titulo = trim($_POST["titulo"]);
+    $isbn = trim($_POST["isbn"]);
+    $anio = $_POST["anio"] === "" ? null : intval($_POST["anio"]);
+    $autor = intval($_POST["autor"]);
+    $editorial = intval($_POST["editorial"]);
+    $disponibilidad = $_POST["disponibilidad"];
+
+    if ($_POST["id_libro"] != "") {
+
+        $id = intval($_POST["id_libro"]);
+
+        $stmt = $conn->prepare(
+            "UPDATE Libros SET titulo=?, ISBN=?, anio_publicacion=?,
+            id_autor=?, id_editorial=?, disponibilidad=?
+            WHERE id_libro=?"
+        );
+
+        $stmt->bind_param(
+            "ssiiisi",
+            $titulo, $isbn, $anio, $autor,
+            $editorial, $disponibilidad, $id
+        );
+
+    } else {
+
+        $stmt = $conn->prepare(
+            "INSERT INTO Libros
+            (titulo, ISBN, anio_publicacion, id_autor,
+            id_editorial, disponibilidad)
+            VALUES (?, ?, ?, ?, ?, ?)"
+        );
+
+        $stmt->bind_param(
+            "ssiiis",
+            $titulo, $isbn, $anio, $autor,
+            $editorial, $disponibilidad
+        );
+    }
+
+    $stmt->execute();
+    $stmt->close();
+
+    header("Location: libros.php");
+    exit;
+}
+
+// OBTENER LIBRO PARA EDITAR
+if (isset($_GET["editar"])) {
+
+    $id = intval($_GET["editar"]);
+
+    $stmt = $conn->prepare(
+        "SELECT * FROM Libros WHERE id_libro = ?"
+    );
+
+    $stmt->bind_param("i", $id);
+    $stmt->execute();
+
+    $resultadoEditar = $stmt->get_result();
+    $libroEditar = $resultadoEditar->fetch_assoc();
+
+    $stmt->close();
+}
+
+// CONSULTAR AUTORES Y EDITORIALES
+$autores = $conn->query("SELECT id_autor, nombre FROM Autores");
+$editoriales = $conn->query("SELECT id_editorial, nombre FROM Editoriales");
+
+// CONSULTAR LIBROS
+$libros = $conn->query("SELECT * FROM Libros ORDER BY id_libro DESC");
+
 ?>
 
 <!DOCTYPE html>
@@ -37,11 +99,12 @@ $libros = $conexion->query("SELECT * FROM Libros");
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Libros - Biblioteca</title>
+
+<title>Libros - Biblioteca García Sevilla</title>
 
 <style>
 body {
-    font-family: Arial;
+    font-family: Arial, sans-serif;
     background: #f1f0fa;
     margin: 0;
     color: #333;
@@ -56,10 +119,16 @@ header {
 
 .contenedor {
     background: white;
-    max-width: 850px;
+    max-width: 950px;
     margin: 25px auto;
-    padding: 20px;
+    padding: 25px;
     border-radius: 12px;
+    box-shadow: 0 3px 10px #0002;
+}
+
+h2 {
+    color: #48417d;
+    text-align: center;
 }
 
 input, select {
@@ -78,6 +147,12 @@ button {
     border: none;
     border-radius: 7px;
     width: 100%;
+    cursor: pointer;
+    margin-top: 8px;
+}
+
+button:hover {
+    background: #48417d;
 }
 
 table {
@@ -88,17 +163,30 @@ table {
 
 th, td {
     border: 1px solid #ddd;
-    padding: 9px;
-    text-align: left;
+    padding: 10px;
+    text-align: center;
 }
 
 th {
     background: #dedafa;
+    color: #48417d;
 }
 
-a {
+.editar {
+    color: #625a9c;
+    font-weight: bold;
+}
+
+.eliminar {
+    background: #a94455;
+}
+
+.volver {
+    display: block;
+    margin-top: 25px;
     color: #625a9c;
 }
+
 </style>
 </head>
 
@@ -111,23 +199,34 @@ a {
 
 <div class="contenedor">
 
-<h2>Registrar nuevo libro</h2>
+<h2>
+<?php echo $libroEditar ? "Modificar libro" : "Registrar nuevo libro"; ?>
+</h2>
 
 <form method="POST">
 
+    <input type="hidden" name="id_libro"
+    value="<?= $libroEditar['id_libro'] ?? '' ?>">
+
     <input type="text" name="titulo"
-    placeholder="Título del libro" required>
+    placeholder="Título del libro"
+    value="<?= htmlspecialchars($libroEditar['titulo'] ?? '') ?>"
+    required>
 
     <input type="text" name="isbn"
-    placeholder="ISBN">
+    placeholder="ISBN"
+    value="<?= htmlspecialchars($libroEditar['ISBN'] ?? '') ?>">
 
     <input type="number" name="anio"
-    placeholder="Año de publicación">
+    placeholder="Año de publicación"
+    value="<?= htmlspecialchars($libroEditar['anio_publicacion'] ?? '') ?>">
 
     <select name="autor" required>
         <option value="">Seleccionar autor</option>
+
         <?php while($a = $autores->fetch_assoc()) { ?>
-        <option value="<?= $a['id_autor'] ?>">
+        <option value="<?= $a['id_autor'] ?>"
+        <?= ($libroEditar && $libroEditar['id_autor'] == $a['id_autor']) ? 'selected' : '' ?>>
             <?= htmlspecialchars($a['nombre']) ?>
         </option>
         <?php } ?>
@@ -135,18 +234,38 @@ a {
 
     <select name="editorial" required>
         <option value="">Seleccionar editorial</option>
+
         <?php while($e = $editoriales->fetch_assoc()) { ?>
-        <option value="<?= $e['id_editorial'] ?>">
+        <option value="<?= $e['id_editorial'] ?>"
+        <?= ($libroEditar && $libroEditar['id_editorial'] == $e['id_editorial']) ? 'selected' : '' ?>>
             <?= htmlspecialchars($e['nombre']) ?>
         </option>
         <?php } ?>
     </select>
 
-    <button type="submit">Guardar libro</button>
+    <select name="disponibilidad">
+        <option value="Disponible"
+        <?= ($libroEditar && $libroEditar['disponibilidad'] == 'Disponible') ? 'selected' : '' ?>>
+            Disponible
+        </option>
+
+        <option value="Prestado"
+        <?= ($libroEditar && $libroEditar['disponibilidad'] == 'Prestado') ? 'selected' : '' ?>>
+            Prestado
+        </option>
+    </select>
+
+    <button type="submit" name="guardar">
+        <?= $libroEditar ? "Actualizar libro" : "Guardar libro" ?>
+    </button>
 
 </form>
 
-<h2>Libros registrados</h2>
+<?php if ($libroEditar) { ?>
+<p><a href="libros.php">Cancelar modificación</a></p>
+<?php } ?>
+
+<h2>📖 Libros registrados</h2>
 
 <table>
 <tr>
@@ -155,23 +274,51 @@ a {
     <th>ISBN</th>
     <th>Año</th>
     <th>Disponibilidad</th>
+    <th>Acciones</th>
 </tr>
 
 <?php while($l = $libros->fetch_assoc()) { ?>
+
 <tr>
     <td><?= $l['id_libro'] ?></td>
+
     <td><?= htmlspecialchars($l['titulo']) ?></td>
+
     <td><?= htmlspecialchars($l['ISBN'] ?? '') ?></td>
-    <td><?= $l['anio_publicacion'] ?></td>
-    <td><?= htmlspecialchars($l['disponibilidad']) ?></td>
+
+    <td><?= htmlspecialchars($l['anio_publicacion'] ?? '') ?></td>
+
+    <td><?= htmlspecialchars($l['disponibilidad'] ?? '') ?></td>
+
+    <td>
+        <a class="editar"
+        href="libros.php?editar=<?= $l['id_libro'] ?>">
+        Editar</a>
+
+        <form method="POST"
+        onsubmit="return confirm('¿Deseas eliminar este libro?');">
+
+            <input type="hidden" name="id_libro"
+            value="<?= $l['id_libro'] ?>">
+
+            <button class="eliminar"
+            type="submit" name="eliminar">
+                Eliminar
+            </button>
+
+        </form>
+    </td>
 </tr>
+
 <?php } ?>
 
 </table>
 
-<br>
-<a href="menu.php">← Volver al menú principal</a>
+<a class="volver" href="menu.php">
+← Volver al menú principal
+</a>
 
 </div>
+
 </body>
 </html>
